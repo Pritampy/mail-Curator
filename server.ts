@@ -89,24 +89,11 @@ app.get("/auth/callback", async (req, res) => {
     const { tokens } = await oauth2Client.getToken(code as string);
     req.session!.tokens = tokens;
     
-    res.send(`
-      <html>
-        <body>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
-              window.close();
-            } else {
-              window.location.href = '/';
-            }
-          </script>
-          <p>Authentication successful. This window should close automatically.</p>
-        </body>
-      </html>
-    `);
+    // Redirect to frontend after successful auth
+    res.redirect(APP_URL);
   } catch (error) {
     console.error("Error exchanging code for tokens:", error);
-    res.status(500).send("Authentication failed");
+    res.redirect(`${APP_URL}?error=auth_failed`);
   }
 });
 

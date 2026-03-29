@@ -131,15 +131,25 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE}/api/auth/url`);
       const { url } = await res.json();
-      const authWindow = window.open(url, 'oauth_popup', 'width=600,height=700');
       
-      const handleMessage = (event: MessageEvent) => {
-        if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-          fetchUser();
-          window.removeEventListener('message', handleMessage);
-        }
-      };
-      window.addEventListener('message', handleMessage);
+      // Check if iOS Safari
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      
+      if (isIOS || window.innerWidth < 768) {
+        // Use full page redirect for iOS
+        window.location.href = url;
+      } else {
+        // Use popup for desktop
+        const authWindow = window.open(url, 'oauth_popup', 'width=600,height=700');
+        
+        const handleMessage = (event: MessageEvent) => {
+          if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+            fetchUser();
+            window.removeEventListener('message', handleMessage);
+          }
+        };
+        window.addEventListener('message', handleMessage);
+      }
     } catch (err) {
       console.error("Login failed", err);
     }
