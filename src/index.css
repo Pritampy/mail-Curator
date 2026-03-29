@@ -1,0 +1,58 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-headline: "Manrope", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-label: "Inter", sans-serif;
+
+  --color-primary: #d095ff;
+  --color-primary-dim: #c57eff;
+  --color-primary-container: #c782ff;
+  --color-on-primary: #490078;
+  
+  --color-secondary: #e4e2e1;
+  --color-secondary-container: #474746;
+  
+  --color-tertiary: #ff96bb;
+  --color-tertiary-container: #fb81ae;
+  
+  --color-background: #0e0e0e;
+  --color-surface: #0e0e0e;
+  --color-surface-container: #1a1919;
+  --color-surface-container-low: #131313;
+  --color-surface-container-high: #201f1f;
+  --color-surface-container-highest: #262626;
+  
+  --color-on-surface: #ffffff;
+  --color-on-surface-variant: #adaaaa;
+  
+  --color-error: #ff6e84;
+  --color-error-container: #a70138;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-on-surface);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.editorial-gradient {
+  background: linear-gradient(135deg, #d095ff 0%, #c782ff 100%);
+}
+
+.glass-card {
+  background: rgba(31, 31, 31, 0.7);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.vibrant-glow {
+  box-shadow: 0 0 30px rgba(208, 149, 255, 0.12);
+}

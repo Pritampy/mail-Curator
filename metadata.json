@@ -1,0 +1,5 @@
+{
+  "name": "Kinetic Gmail Cleaner",
+  "description": "A swipe-based Gmail inbox cleaner PWA for reaching Inbox Zero with ease.",
+  "requestFramePermissions": []
+}

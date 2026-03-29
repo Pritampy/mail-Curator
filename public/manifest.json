@@ -1,0 +1,23 @@
+{
+  "name": "Kinetic - Gmail Inbox Cleaner",
+  "short_name": "Kinetic",
+  "description": "Clean your Gmail inbox with a swipe",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#d095ff",
+  "scope": "/",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
