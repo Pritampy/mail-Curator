@@ -12,7 +12,11 @@ dotenv.config();
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const APP_URL = process.env.APP_URL;
+const getAppUrl = () => {
+  const url = process.env.APP_URL || 'http://localhost:5173';
+  return url.startsWith('http') ? url : `https://${url}`;
+};
+const APP_URL = getAppUrl();
 const MONGODB_URI = process.env.MONGODB_URI;
 
 if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
