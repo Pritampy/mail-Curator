@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kinetic-v2';
+const CACHE_NAME = 'kinetic-v1';
 const STATIC_ASSETS = [
   '/',
   '/index.html'
