@@ -17,6 +17,10 @@ const getAppUrl = () => {
   return url.startsWith('http') ? url : `https://${url}`;
 };
 const APP_URL = getAppUrl();
+// In production the server runs on a different domain than the frontend.
+// SERVER_URL is the server's own public URL, used for the OAuth callback.
+// Falls back to APP_URL for local dev where both run on the same host.
+const SERVER_URL = process.env.SERVER_URL || APP_URL;
 const MONGODB_URI = process.env.MONGODB_URI;
 
 if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
@@ -30,11 +34,11 @@ const PORT = 3000;
 let gmailService: GmailService | null = null;
 let dbService: DbService | null = null;
 
-// OAuth2 Setup
+// OAuth2 Setup — redirect URI must point to this server, not the frontend
 const oauth2Client = new google.auth.OAuth2(
   GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET,
-  `${APP_URL}/auth/callback`
+  `${SERVER_URL}/auth/callback`
 );
 
 // Initialize services
