@@ -162,6 +162,18 @@ export default function App() {
     if (!authUrl) fetchAuthUrl();
   };
 
+  const handleLogout = async () => {
+    try {
+      await apiFetch('/api/logout', { method: 'POST' });
+    } catch (err) {
+      console.error('Logout request failed', err);
+    }
+    clearSessionToken();
+    setUser(null);
+    setEmails([]);
+    setStats(null);
+  };
+
   // Called from the modal's "Continue with Google" button - runs synchronously
   // from a direct user tap, which avoids iOS Safari's popup blocker.
   const handleAuthProceed = () => {
@@ -601,7 +613,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-background text-on-surface pb-32">
-      <TopBar user={user} />
+      <TopBar user={user} onLogout={handleLogout} />
       
       <main className="pt-24 px-6 max-w-lg mx-auto">
         {loading ? (
