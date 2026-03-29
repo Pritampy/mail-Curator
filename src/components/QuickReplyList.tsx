@@ -13,7 +13,7 @@ export const QuickReplyList: React.FC<QuickReplyListProps> = ({ onEditReply, onD
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/quickreplies', { credentials: 'include' })
+    fetch(`${import.meta.env.VITE_API_URL || ''}/api/quickreplies`, { credentials: 'include' })
       .then(res => res.json())
       .then(data => {
         setReplies(data);

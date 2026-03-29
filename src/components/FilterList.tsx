@@ -14,7 +14,7 @@ export const FilterList: React.FC<FilterListProps> = ({ onEditFilter, onDeleteFi
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/filters', { credentials: 'include' })
+    fetch(`${import.meta.env.VITE_API_URL || ''}/api/filters`, { credentials: 'include' })
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch filters');
         return res.json();

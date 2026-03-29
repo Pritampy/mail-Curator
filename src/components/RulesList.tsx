@@ -15,7 +15,7 @@ export const RulesList: React.FC<RulesListProps> = ({ onEditRule, onDeleteRule, 
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/rules', { credentials: 'include' })
+    fetch(`${import.meta.env.VITE_API_URL || ''}/api/rules`, { credentials: 'include' })
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch rules');
         return res.json();

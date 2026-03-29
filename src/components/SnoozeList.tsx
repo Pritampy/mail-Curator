@@ -13,7 +13,7 @@ export const SnoozeList: React.FC<SnoozeListProps> = ({ onUnsnooze, onExtend }) 
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/snooze', { credentials: 'include' })
+    fetch(`${import.meta.env.VITE_API_URL || ''}/api/snooze`, { credentials: 'include' })
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch snoozed emails');
         return res.json();

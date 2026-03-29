@@ -14,6 +14,10 @@ import { DeferredDeleteQueue } from './components/DeferredDelete';
 import { Email, Stats, User, Filter, Rule, SnoozeDuration, QuickReply } from './types';
 import { LogIn, RefreshCw, Trash2 } from 'lucide-react';
 
+const API_BASE = typeof import.meta.env !== 'undefined' && import.meta.env.VITE_API_URL 
+  ? import.meta.env.VITE_API_URL 
+  : '';
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('inbox');
   const [user, setUser] = useState<User | null>(null);
@@ -41,7 +45,7 @@ export default function App() {
 
   const fetchUser = async () => {
     try {
-      const res = await fetch('/api/user');
+      const res = await fetch(`${API_BASE}/api/user`);
       if (res.ok) {
         const data = await res.json();
         setUser(data);
@@ -58,7 +62,7 @@ export default function App() {
       setLoading(true);
     }
     try {
-      const res = await fetch('/api/emails?maxResults=100');
+      const res = await fetch(`${API_BASE}/api/emails?maxResults=100`);
       if (res.ok) {
         const data = await res.json();
         if (append) {
@@ -94,7 +98,7 @@ export default function App() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch('/api/stats');
+      const res = await fetch(`${API_BASE}/api/stats`);
       if (res.ok) {
         const data = await res.json();
         setStats(data);
@@ -125,7 +129,7 @@ export default function App() {
 
   const handleLogin = async () => {
     try {
-      const res = await fetch('/api/auth/url');
+      const res = await fetch(`${API_BASE}/api/auth/url`);
       const { url } = await res.json();
       const authWindow = window.open(url, 'oauth_popup', 'width=600,height=700');
       
@@ -185,7 +189,7 @@ export default function App() {
     setBatchDeleting(true);
 
     try {
-      const res = await fetch('/api/bulk/delete-batch', {
+      const res = await fetch(`${API_BASE}/api/bulk/delete-batch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -230,7 +234,7 @@ export default function App() {
     // If the action was delete, we need to untrash the email
     if (lastAction.action === 'delete') {
       try {
-        await fetch('/api/undo', {
+        await fetch(`${API_BASE}/api/undo`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ emailId: lastAction.emailId })
@@ -374,7 +378,7 @@ export default function App() {
     }
 
     try {
-      const res = await fetch('/api/snooze', {
+      const res = await fetch(`${API_BASE}/api/snooze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

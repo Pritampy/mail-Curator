@@ -25,14 +25,14 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({ stats, onStartSe
   const [prediction, setPrediction] = useState<Prediction | null>(null);
 
   useEffect(() => {
-    fetch('/api/milestones', { credentials: 'include' })
+    fetch(`${import.meta.env.VITE_API_URL || ''}/api/milestones`, { credentials: 'include' })
       .then(res => res.json())
       .then(data => setMilestones(data))
       .catch(console.error);
   }, []);
 
   useEffect(() => {
-    fetch('/api/prediction', { credentials: 'include' })
+    fetch(`${import.meta.env.VITE_API_URL || ''}/api/prediction`, { credentials: 'include' })
       .then(res => res.json())
       .then(data => setPrediction(data))
       .catch(console.error);

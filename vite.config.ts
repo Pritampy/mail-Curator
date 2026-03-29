@@ -5,6 +5,9 @@ import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  const apiUrl = mode === 'production' 
+    ? 'https://mail-curator.onrender.com' 
+    : 'http://localhost:5173';
   return {
     plugins: [
       react(), 
@@ -12,6 +15,8 @@ export default defineConfig(({mode}) => {
     ],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      'process.env.API_URL': JSON.stringify(apiUrl),
+      'import.meta.env.VITE_API_URL': JSON.stringify(apiUrl),
     },
     resolve: {
       alias: {
