@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && npx esbuild server.ts --bundle --platform=node --outfile=dist/server.cjs --format=cjs --external:mongoose --external:googleapis --external:cookie-session --external:cors --external:dotenv --external:vite --external:@vitejs/plugin-react --external:@tailwindcss/vite",
+    "build": "vite build && npx esbuild server.ts --bundle --platform=node --outfile=dist/server.cjs --format=cjs --external:mongoose --external:googleapis --external:cors --external:dotenv --external:vite --external:@vitejs/plugin-react --external:@tailwindcss/vite",
     "preview": "vite preview",
     "clean": "rm -rf dist build",
     "lint": "tsc --noEmit",
@@ -14,12 +14,10 @@
   "dependencies": {
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
-    "@types/cookie-session": "^2.0.49",
     "@types/cors": "^2.8.19",
     "@types/mongoose": "^5.11.96",
     "@vitejs/plugin-react": "^5.0.4",
     "clsx": "^2.1.1",
-    "cookie-session": "^2.1.1",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",

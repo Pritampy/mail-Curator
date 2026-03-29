@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Rule } from '../types';
 import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Play, Clock, AlertCircle } from 'lucide-react';
+import { apiFetch } from '../lib/apiFetch';
 
 interface RulesListProps {
   onEditRule: (rule: Rule) => void;
@@ -15,7 +16,7 @@ export const RulesList: React.FC<RulesListProps> = ({ onEditRule, onDeleteRule, 
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL || ''}/api/rules`, { credentials: 'include' })
+    apiFetch('/api/rules')
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch rules');
         return res.json();

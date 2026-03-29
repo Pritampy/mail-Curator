@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Filter } from '../types';
 import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, Filter as FilterIcon } from 'lucide-react';
+import { apiFetch } from '../lib/apiFetch';
 
 interface FilterListProps {
   onEditFilter: (filter: Filter) => void;
@@ -14,7 +15,7 @@ export const FilterList: React.FC<FilterListProps> = ({ onEditFilter, onDeleteFi
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL || ''}/api/filters`, { credentials: 'include' })
+    apiFetch('/api/filters')
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch filters');
         return res.json();

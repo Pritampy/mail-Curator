@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, ResponsiveContainer, Cell } from 'recharts';
 import { Stats } from '../types';
 import { Award, Zap, TrendingUp, Inbox, SkipForward } from 'lucide-react';
+import { apiFetch } from '../lib/apiFetch';
 
 interface Milestone {
   milestoneId: string;
@@ -25,14 +26,14 @@ export const StatsDashboard: React.FC<StatsDashboardProps> = ({ stats, onStartSe
   const [prediction, setPrediction] = useState<Prediction | null>(null);
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL || ''}/api/milestones`, { credentials: 'include' })
+    apiFetch('/api/milestones')
       .then(res => res.json())
       .then(data => setMilestones(data))
       .catch(console.error);
   }, []);
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL || ''}/api/prediction`, { credentials: 'include' })
+    apiFetch('/api/prediction')
       .then(res => res.json())
       .then(data => setPrediction(data))
       .catch(console.error);

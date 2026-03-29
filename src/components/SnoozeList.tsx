@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SnoozedEmail, SnoozeDuration } from '../types';
 import { Clock, Play, Calendar, Trash2, Mail } from 'lucide-react';
+import { apiFetch } from '../lib/apiFetch';
 
 interface SnoozeListProps {
   onUnsnooze: (id: string) => void;
@@ -13,7 +14,7 @@ export const SnoozeList: React.FC<SnoozeListProps> = ({ onUnsnooze, onExtend }) 
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL || ''}/api/snooze`, { credentials: 'include' })
+    apiFetch('/api/snooze')
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch snoozed emails');
         return res.json();

@@ -1,12 +1,13 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import crypto from "crypto";
 import { google } from "googleapis";
-import cookieSession from "cookie-session";
 import cors from "cors";
 import dotenv from "dotenv";
 import { GmailService } from "./src/services/gmailService";
 import { DbService } from "./src/services/dbService";
+import { Session } from "./src/models/Session";
 
 dotenv.config();
 
@@ -17,9 +18,6 @@ const getAppUrl = () => {
   return url.startsWith('http') ? url : `https://${url}`;
 };
 const APP_URL = getAppUrl();
-// In production the server runs on a different domain than the frontend.
-// SERVER_URL is the server's own public URL, used for the OAuth callback.
-// Falls back to APP_URL for local dev where both run on the same host.
 const SERVER_URL = process.env.SERVER_URL || APP_URL;
 const MONGODB_URI = process.env.MONGODB_URI;
 
@@ -52,24 +50,48 @@ async function initializeServices() {
   gmailService = new GmailService(oauth2Client);
 }
 
-function getUserId(req: express.Request): string {
-  return req.session?.tokens?.access_token?.substring(0, 20) || 'anonymous';
-}
+// ---------- Middleware ----------
 
 app.use(express.json());
 app.use(cors({
   origin: APP_URL,
-  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-const isProduction = process.env.NODE_ENV === 'production';
-app.use(cookieSession({
-  name: 'session',
-  keys: ['kinetic-secret-key'],
-  maxAge: 24 * 60 * 60 * 1000, // 24 hours
-  secure: isProduction,
-  sameSite: 'none',
-  httpOnly: true
-}));
+
+// Bearer token auth middleware — replaces cookie-session.
+// Populates req.session.tokens from MongoDB so all existing route handlers
+// continue working without changes.
+app.use("/api", (req, res, next) => {
+  // /api/auth/url is public — no token required
+  if (req.path === '/auth/url') return next();
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+
+  const token = authHeader.slice(7);
+  Session.findOne({ sessionToken: token })
+    .then((session) => {
+      if (!session) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      // Compatibility shim: populate req.session so existing handlers work unchanged
+      (req as any).session = { tokens: session.tokens };
+      (req as any).sessionToken = token;
+      next();
+    })
+    .catch((err) => {
+      console.error("Session lookup error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    });
+});
+
+function getUserId(req: express.Request): string {
+  return (req as any).session?.tokens?.access_token?.substring(0, 20) || 'anonymous';
+}
+
+// ---------- Auth Routes ----------
 
 app.get("/api/auth/url", (req, res) => {
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
@@ -94,18 +116,21 @@ app.get("/auth/callback", async (req, res) => {
   const { code } = req.query;
   try {
     const { tokens } = await oauth2Client.getToken(code as string);
-    req.session!.tokens = tokens;
-    
-    // Serve a page that handles both popup and redirect auth flows.
-    // If opened in a popup (window.opener exists), notify the parent and close.
-    // Otherwise, redirect normally.
+
+    // Generate opaque session token and store in MongoDB
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    await Session.create({ sessionToken, tokens });
+
+    // Deliver token to frontend via postMessage (popup) or hash fragment (redirect).
+    // Hash fragments are never sent to the server — safe from logging.
     const targetOrigin = JSON.stringify(APP_URL);
+    const safeToken = JSON.stringify(sessionToken);
     res.send(`<!DOCTYPE html><html><head><title>Authenticating...</title></head><body><script>
       if (window.opener) {
-        try { window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, ${targetOrigin}); } catch(e) {}
+        try { window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS', token: ${safeToken} }, ${targetOrigin}); } catch(e) {}
         window.close();
       } else {
-        window.location.href = ${targetOrigin};
+        window.location.href = ${targetOrigin} + '/#token=' + ${safeToken};
       }
     </script><p>Redirecting...</p></body></html>`);
   } catch (error) {
@@ -114,11 +139,14 @@ app.get("/auth/callback", async (req, res) => {
   }
 });
 
+// ---------- API Routes ----------
+// All routes below are protected by the Bearer token middleware above.
+
 app.get("/api/user", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
   
   try {
-    oauth2Client.setCredentials(req.session.tokens);
+    oauth2Client.setCredentials((req as any).session.tokens);
     const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
     const userInfo = await oauth2.userinfo.get();
     res.json(userInfo.data);
@@ -128,15 +156,24 @@ app.get("/api/user", async (req, res) => {
 });
 
 app.get("/api/emails", async (req, res) => {
-  if (!req.session?.tokens || !gmailService) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens || !gmailService) return res.status(401).json({ error: "Not authenticated" });
 
   try {
-    oauth2Client.setCredentials(req.session.tokens);
+    oauth2Client.setCredentials((req as any).session.tokens);
     
-    // Check if token needs refresh
-    if (req.session.tokens.refresh_token) {
-      oauth2Client.on('tokens', (tokens) => {
-        req.session!.tokens = { ...req.session!.tokens, ...tokens };
+    // When Google refreshes tokens, persist them back to the session store
+    if ((req as any).session.tokens.refresh_token) {
+      oauth2Client.on('tokens', async (newTokens) => {
+        const merged = { ...(req as any).session.tokens, ...newTokens };
+        (req as any).session.tokens = merged;
+        try {
+          await Session.updateOne(
+            { sessionToken: (req as any).sessionToken },
+            { tokens: merged }
+          );
+        } catch (e) {
+          console.error("Failed to persist refreshed tokens:", e);
+        }
       });
     }
     
@@ -154,7 +191,7 @@ app.get("/api/emails", async (req, res) => {
 });
 
 app.post("/api/delete", async (req, res) => {
-  if (!req.session?.tokens || !gmailService || !dbService) {
+  if (!(req as any).session?.tokens || !gmailService || !dbService) {
     return res.status(401).json({ error: "Not authenticated" });
   }
 
@@ -164,7 +201,7 @@ app.post("/api/delete", async (req, res) => {
   }
 
   try {
-    oauth2Client.setCredentials(req.session.tokens);
+    oauth2Client.setCredentials((req as any).session.tokens);
     const userId = getUserId(req);
 
     await gmailService.deleteEmail(emailId);
@@ -185,7 +222,7 @@ app.post("/api/delete", async (req, res) => {
 });
 
 app.post("/api/skip", async (req, res) => {
-  if (!req.session?.tokens || !dbService) {
+  if (!(req as any).session?.tokens || !dbService) {
     return res.status(401).json({ error: "Not authenticated" });
   }
 
@@ -213,7 +250,7 @@ app.post("/api/skip", async (req, res) => {
 });
 
 app.post("/api/undo", async (req, res) => {
-  if (!req.session?.tokens || !gmailService || !dbService) {
+  if (!(req as any).session?.tokens || !gmailService || !dbService) {
     return res.status(401).json({ error: "Not authenticated" });
   }
 
@@ -223,7 +260,7 @@ app.post("/api/undo", async (req, res) => {
   }
 
   try {
-    oauth2Client.setCredentials(req.session.tokens);
+    oauth2Client.setCredentials((req as any).session.tokens);
     const userId = getUserId(req);
 
     await gmailService.untrashEmail(emailId);
@@ -237,7 +274,7 @@ app.post("/api/undo", async (req, res) => {
 });
 
 app.get("/api/stats", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -255,7 +292,7 @@ app.get("/api/stats", async (req, res) => {
 });
 
 app.get("/api/milestones", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -273,7 +310,7 @@ app.get("/api/milestones", async (req, res) => {
 });
 
 app.get("/api/prediction", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -291,7 +328,7 @@ app.get("/api/prediction", async (req, res) => {
 });
 
 app.get("/api/filters", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -308,7 +345,7 @@ app.get("/api/filters", async (req, res) => {
 });
 
 app.post("/api/filters", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -325,7 +362,7 @@ app.post("/api/filters", async (req, res) => {
 });
 
 app.patch("/api/filters/:id", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -342,7 +379,7 @@ app.patch("/api/filters/:id", async (req, res) => {
 });
 
 app.delete("/api/filters/:id", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -359,7 +396,7 @@ app.delete("/api/filters/:id", async (req, res) => {
 });
 
 app.post("/api/filters/:id/toggle", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -377,7 +414,7 @@ app.post("/api/filters/:id/toggle", async (req, res) => {
 });
 
 app.get("/api/rules", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -394,7 +431,7 @@ app.get("/api/rules", async (req, res) => {
 });
 
 app.post("/api/rules", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -411,7 +448,7 @@ app.post("/api/rules", async (req, res) => {
 });
 
 app.patch("/api/rules/:id", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -428,7 +465,7 @@ app.patch("/api/rules/:id", async (req, res) => {
 });
 
 app.delete("/api/rules/:id", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -445,7 +482,7 @@ app.delete("/api/rules/:id", async (req, res) => {
 });
 
 app.post("/api/rules/:id/toggle", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -463,7 +500,7 @@ app.post("/api/rules/:id/toggle", async (req, res) => {
 });
 
 app.get("/api/rules/due", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     if (dbService) {
@@ -479,7 +516,7 @@ app.get("/api/rules/due", async (req, res) => {
 });
 
 app.post("/api/rules/:id/execute", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     if (dbService) {
@@ -495,7 +532,7 @@ app.post("/api/rules/:id/execute", async (req, res) => {
 });
 
 app.post("/api/snooze", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -518,7 +555,7 @@ app.post("/api/snooze", async (req, res) => {
 });
 
 app.get("/api/snooze", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -535,7 +572,7 @@ app.get("/api/snooze", async (req, res) => {
 });
 
 app.delete("/api/snooze/:id", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -552,7 +589,7 @@ app.delete("/api/snooze/:id", async (req, res) => {
 });
 
 app.post("/api/snooze/:id/extend", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -575,7 +612,7 @@ app.post("/api/snooze/:id/extend", async (req, res) => {
 });
 
 app.get("/api/snooze/due", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -592,7 +629,7 @@ app.get("/api/snooze/due", async (req, res) => {
 });
 
 app.get("/api/snooze/settings", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -609,7 +646,7 @@ app.get("/api/snooze/settings", async (req, res) => {
 });
 
 app.put("/api/snooze/settings", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -626,7 +663,7 @@ app.put("/api/snooze/settings", async (req, res) => {
 });
 
 app.get("/api/quickreplies", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -643,7 +680,7 @@ app.get("/api/quickreplies", async (req, res) => {
 });
 
 app.post("/api/quickreplies", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -664,7 +701,7 @@ app.post("/api/quickreplies", async (req, res) => {
 });
 
 app.patch("/api/quickreplies/:id", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -681,7 +718,7 @@ app.patch("/api/quickreplies/:id", async (req, res) => {
 });
 
 app.delete("/api/quickreplies/:id", async (req, res) => {
-  if (!req.session?.tokens) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const userId = getUserId(req);
@@ -698,7 +735,7 @@ app.delete("/api/quickreplies/:id", async (req, res) => {
 });
 
 app.post("/api/bulk/delete", async (req, res) => {
-  if (!req.session?.tokens || !gmailService) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens || !gmailService) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const { emailIds } = req.body;
@@ -706,7 +743,7 @@ app.post("/api/bulk/delete", async (req, res) => {
       return res.status(400).json({ error: "emailIds array is required" });
     }
     
-    oauth2Client.setCredentials(req.session.tokens);
+    oauth2Client.setCredentials((req as any).session.tokens);
     const userId = getUserId(req);
     
     for (const emailId of emailIds) {
@@ -721,7 +758,7 @@ app.post("/api/bulk/delete", async (req, res) => {
 });
 
 app.post("/api/bulk/archive", async (req, res) => {
-  if (!req.session?.tokens || !gmailService) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens || !gmailService) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const { emailIds } = req.body;
@@ -729,7 +766,7 @@ app.post("/api/bulk/archive", async (req, res) => {
       return res.status(400).json({ error: "emailIds array is required" });
     }
     
-    oauth2Client.setCredentials(req.session.tokens);
+    oauth2Client.setCredentials((req as any).session.tokens);
     
     for (const emailId of emailIds) {
       await gmailService.archiveEmail(emailId);
@@ -743,7 +780,7 @@ app.post("/api/bulk/archive", async (req, res) => {
 });
 
 app.post("/api/bulk/skip", async (req, res) => {
-  if (!req.session?.tokens || !dbService) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens || !dbService) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const { emailIds, senders, subjects } = req.body;
@@ -771,7 +808,7 @@ app.post("/api/bulk/skip", async (req, res) => {
 });
 
 app.post("/api/bulk/label", async (req, res) => {
-  if (!req.session?.tokens || !gmailService) return res.status(401).json({ error: "Not authenticated" });
+  if (!(req as any).session?.tokens || !gmailService) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const { emailIds, label } = req.body;
@@ -782,7 +819,7 @@ app.post("/api/bulk/label", async (req, res) => {
       return res.status(400).json({ error: "label is required" });
     }
     
-    oauth2Client.setCredentials(req.session.tokens);
+    oauth2Client.setCredentials((req as any).session.tokens);
     
     for (const emailId of emailIds) {
       await gmailService.addLabel(emailId, label);
@@ -796,7 +833,7 @@ app.post("/api/bulk/label", async (req, res) => {
 });
 
 app.post("/api/bulk/delete-batch", async (req, res) => {
-  if (!req.session?.tokens || !gmailService || !dbService) {
+  if (!(req as any).session?.tokens || !gmailService || !dbService) {
     return res.status(401).json({ error: "Not authenticated" });
   }
 
@@ -811,14 +848,11 @@ app.post("/api/bulk/delete-batch", async (req, res) => {
     let deletedCount = 0;
     const errors: string[] = [];
 
-    // Process each email - batch the Gmail API calls
     for (let i = 0; i < emailIds.length; i++) {
       const emailId = emailIds[i];
       try {
-        // Delete from Gmail
         await gmailService.deleteEmail(emailId);
         
-        // Record action in database
         await dbService.saveAction({
           emailId,
           sender: senders?.[i] || '',
@@ -846,8 +880,16 @@ app.post("/api/bulk/delete-batch", async (req, res) => {
   }
 });
 
-app.post("/api/logout", (req, res) => {
-  req.session = null;
+app.post("/api/logout", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice(7);
+    try {
+      await Session.deleteOne({ sessionToken: token });
+    } catch (err) {
+      console.error("Logout session delete error:", err);
+    }
+  }
   res.json({ success: true });
 });
 

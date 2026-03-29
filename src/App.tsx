@@ -12,11 +12,8 @@ import { QuickReplyEditor } from './components/QuickReplyEditor';
 import { BulkSelectMode } from './components/BulkSelectMode';
 import { DeferredDeleteQueue } from './components/DeferredDelete';
 import { Email, Stats, User, Filter, Rule, SnoozeDuration, QuickReply } from './types';
+import { apiFetch, getSessionToken, setSessionToken, clearSessionToken } from './lib/apiFetch';
 import { LogIn, RefreshCw, Trash2, X, Mail, Shield } from 'lucide-react';
-
-const API_BASE = typeof import.meta.env !== 'undefined' && import.meta.env.VITE_API_URL 
-  ? import.meta.env.VITE_API_URL 
-  : '';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('inbox');
@@ -47,7 +44,7 @@ export default function App() {
 
   const fetchUser = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/user`, { credentials: 'include' });
+      const res = await apiFetch('/api/user');
       if (res.ok) {
         const data = await res.json();
         setUser(data);
@@ -64,7 +61,7 @@ export default function App() {
       setLoading(true);
     }
     try {
-      const res = await fetch(`${API_BASE}/api/emails?maxResults=100`, { credentials: 'include' });
+      const res = await apiFetch('/api/emails?maxResults=100');
       if (res.ok) {
         const data = await res.json();
         if (append) {
@@ -77,7 +74,7 @@ export default function App() {
           setEmails(data);
         }
       } else if (res.status === 401) {
-        handleLogin();
+        setUser(null);
       }
     } catch (err) {
       console.error("Failed to fetch emails", err);
@@ -100,7 +97,7 @@ export default function App() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/stats`, { credentials: 'include' });
+      const res = await apiFetch('/api/stats');
       if (res.ok) {
         const data = await res.json();
         setStats(data);
@@ -113,7 +110,19 @@ export default function App() {
 
   useEffect(() => {
     const init = async () => {
-      await fetchUser();
+      // Check for session token in URL hash (redirect flow from OAuth callback)
+      const hash = window.location.hash;
+      if (hash.startsWith('#token=')) {
+        const token = hash.slice(7);
+        setSessionToken(token);
+        // Clean the hash from the URL without triggering a reload
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+
+      // If we have a token, try to fetch the user
+      if (getSessionToken()) {
+        await fetchUser();
+      }
       await fetchStats();
       setLoading(false);
     };
@@ -123,7 +132,7 @@ export default function App() {
   // Pre-fetch auth URL so it's available immediately on button click (fixes iOS Safari)
   const fetchAuthUrl = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/auth/url`, { credentials: 'include' });
+      const res = await apiFetch('/api/auth/url');
       if (res.ok) {
         const { url } = await res.json();
         setAuthUrl(url);
@@ -168,7 +177,8 @@ export default function App() {
       const authWindow = window.open(authUrl, 'oauth_popup', 'width=600,height=700');
 
       const handleMessage = (event: MessageEvent) => {
-        if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        if (event.data?.type === 'OAUTH_AUTH_SUCCESS' && event.data.token) {
+          setSessionToken(event.data.token);
           fetchUser();
           setShowAuthModal(false);
           window.removeEventListener('message', handleMessage);
@@ -180,7 +190,10 @@ export default function App() {
       const pollTimer = setInterval(() => {
         if (authWindow && authWindow.closed) {
           clearInterval(pollTimer);
-          fetchUser();
+          // If token was already set via postMessage, fetchUser is already called
+          if (getSessionToken()) {
+            fetchUser();
+          }
           setShowAuthModal(false);
           window.removeEventListener('message', handleMessage);
         }
@@ -203,9 +216,8 @@ export default function App() {
     setLastAction({ emailId, action, data: emailData });
 
     try {
-      const res = await fetch(endpoint, {
+      const res = await apiFetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           emailId, 
           sender: emailData.from, 
@@ -232,9 +244,8 @@ export default function App() {
     setBatchDeleting(true);
 
     try {
-      const res = await fetch(`${API_BASE}/api/bulk/delete-batch`, {
+      const res = await apiFetch('/api/bulk/delete-batch', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           emailIds: pendingDeletes.map(e => e.id),
           senders: pendingDeletes.map(e => e.from),
@@ -248,7 +259,6 @@ export default function App() {
       fetchStats();
     } catch (err) {
       console.error('Batch delete failed', err);
-      // Rollback: put emails back into the card stack
       setEmails(prev => [...pendingDeletes, ...prev]);
       setPendingDeletes([]);
       setError('Batch delete failed. Emails restored.');
@@ -274,12 +284,10 @@ export default function App() {
   const handleUndo = async () => {
     if (!lastAction) return;
     
-    // If the action was delete, we need to untrash the email
     if (lastAction.action === 'delete') {
       try {
-        await fetch(`${API_BASE}/api/undo`, {
+        await apiFetch('/api/undo', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ emailId: lastAction.emailId })
         });
       } catch (err) {
@@ -295,11 +303,10 @@ export default function App() {
   const handleSaveFilter = async (filter: Partial<Filter>) => {
     try {
       const method = editingFilter ? 'PATCH' : 'POST';
-      const url = editingFilter ? `/api/filters/${editingFilter._id}` : '/api/filters';
+      const path = editingFilter ? `/api/filters/${editingFilter._id}` : '/api/filters';
       
-      const res = await fetch(url, {
+      const res = await apiFetch(path, {
         method,
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(filter)
       });
       
@@ -316,7 +323,7 @@ export default function App() {
 
   const handleDeleteFilter = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/filters/${id}`, { method: 'DELETE', credentials: 'include' });
+      const res = await apiFetch(`/api/filters/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete filter');
     } catch (err) {
       console.error('Failed to delete filter', err);
@@ -327,9 +334,8 @@ export default function App() {
 
   const handleToggleFilter = async (id: string, enabled: boolean) => {
     try {
-      const res = await fetch(`${API_BASE}/api/filters/${id}/toggle`, {
+      const res = await apiFetch(`/api/filters/${id}/toggle`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled })
       });
       if (!res.ok) throw new Error('Failed to toggle filter');
@@ -341,11 +347,10 @@ export default function App() {
   const handleSaveRule = async (rule: Partial<Rule>) => {
     try {
       const method = editingRule ? 'PATCH' : 'POST';
-      const url = editingRule ? `/api/rules/${editingRule._id}` : '/api/rules';
+      const path = editingRule ? `/api/rules/${editingRule._id}` : '/api/rules';
       
-      const res = await fetch(url, {
+      const res = await apiFetch(path, {
         method,
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(rule)
       });
       
@@ -362,7 +367,7 @@ export default function App() {
 
   const handleDeleteRule = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/rules/${id}`, { method: 'DELETE', credentials: 'include' });
+      const res = await apiFetch(`/api/rules/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete rule');
     } catch (err) {
       console.error('Failed to delete rule', err);
@@ -373,9 +378,8 @@ export default function App() {
 
   const handleToggleRule = async (id: string, enabled: boolean) => {
     try {
-      const res = await fetch(`${API_BASE}/api/rules/${id}/toggle`, {
+      const res = await apiFetch(`/api/rules/${id}/toggle`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled })
       });
       if (!res.ok) throw new Error('Failed to toggle rule');
@@ -386,7 +390,7 @@ export default function App() {
 
   const handleRunRule = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/rules/${id}/execute`, { method: 'POST', credentials: 'include' });
+      const res = await apiFetch(`/api/rules/${id}/execute`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to execute rule');
     } catch (err) {
       console.error('Failed to execute rule', err);
@@ -421,9 +425,8 @@ export default function App() {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/api/snooze`, {
+      const res = await apiFetch('/api/snooze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           emailId,
           sender: emailData.from,
@@ -441,7 +444,7 @@ export default function App() {
 
   const handleUnsnooze = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/snooze/${id}`, { method: 'DELETE', credentials: 'include' });
+      const res = await apiFetch(`/api/snooze/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to unsnooze');
     } catch (err) {
       console.error('Failed to unsnooze', err);
@@ -450,9 +453,8 @@ export default function App() {
 
   const handleExtendSnooze = async (id: string, newDate: Date) => {
     try {
-      const res = await fetch(`${API_BASE}/api/snooze/${id}/extend`, {
+      const res = await apiFetch(`/api/snooze/${id}/extend`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ snoozedUntil: newDate.toISOString() })
       });
       if (!res.ok) throw new Error('Failed to extend snooze');
@@ -464,10 +466,9 @@ export default function App() {
   const handleSaveReply = async (name: string, template: string) => {
     try {
       const method = editingReply ? 'PATCH' : 'POST';
-      const url = editingReply ? `/api/quickreplies/${editingReply._id}` : '/api/quickreplies';
-      const res = await fetch(url, {
+      const path = editingReply ? `/api/quickreplies/${editingReply._id}` : '/api/quickreplies';
+      const res = await apiFetch(path, {
         method,
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, template })
       });
       if (!res.ok) throw new Error('Failed to save reply');
@@ -480,7 +481,7 @@ export default function App() {
 
   const handleDeleteReply = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/quickreplies/${id}`, { method: 'DELETE', credentials: 'include' });
+      const res = await apiFetch(`/api/quickreplies/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete reply');
     } catch (err) {
       console.error('Failed to delete reply', err);
@@ -497,9 +498,8 @@ export default function App() {
 
   const handleBulkAction = async (action: 'delete' | 'archive' | 'skip' | 'label', emailIds: string[]) => {
     try {
-      const res = await fetch(`${API_BASE}/api/bulk/${action}`, {
+      const res = await apiFetch(`/api/bulk/${action}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ emailIds })
       });
       if (!res.ok) throw new Error(`Failed to bulk ${action}`);

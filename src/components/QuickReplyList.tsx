@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { QuickReply } from '../types';
 import { Plus, Edit2, Trash2, MessageSquare } from 'lucide-react';
+import { apiFetch } from '../lib/apiFetch';
 
 interface QuickReplyListProps {
   onEditReply: (reply: QuickReply) => void;
@@ -13,7 +14,7 @@ export const QuickReplyList: React.FC<QuickReplyListProps> = ({ onEditReply, onD
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL || ''}/api/quickreplies`, { credentials: 'include' })
+    apiFetch('/api/quickreplies')
       .then(res => res.json())
       .then(data => {
         setReplies(data);
