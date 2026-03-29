@@ -537,7 +537,7 @@ export default function App() {
             className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-6"
             onClick={(e) => { if (e.target === e.currentTarget) setShowAuthModal(false); }}
           >
-            <div className="relative bg-surface-container rounded-t-3xl sm:rounded-3xl p-8 w-full max-w-sm shadow-2xl animate-in slide-in-from-bottom-4 fade-in duration-300">
+            <div className="bg-surface-container rounded-t-3xl sm:rounded-3xl p-8 w-full max-w-sm shadow-2xl animate-in slide-in-from-bottom-4 fade-in duration-300">
               {/* Close button */}
               <button
                 onClick={() => setShowAuthModal(false)}

@@ -148,43 +148,31 @@ export default function App() {
     }
   }, [user, activeTab]);
 
-  const handleLogin = () => {
-    setShowAuthModal(true);
-    if (!authUrl) fetchAuthUrl();
-  };
-
-  // Called from the modal's "Continue with Google" button - runs synchronously
-  // from a direct user tap, which avoids iOS Safari's popup blocker.
-  const handleAuthProceed = () => {
-    if (!authUrl) return;
-
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-
-    if (isIOS || window.innerWidth < 768) {
-      // Full-page redirect for iOS / mobile (synchronous from user tap)
-      window.location.href = authUrl;
-    } else {
-      // Popup for desktop - opened synchronously from user click
-      const authWindow = window.open(authUrl, 'oauth_popup', 'width=600,height=700');
-
-      const handleMessage = (event: MessageEvent) => {
-        if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-          fetchUser();
-          setShowAuthModal(false);
-          window.removeEventListener('message', handleMessage);
-        }
-      };
-      window.addEventListener('message', handleMessage);
-
-      // Fallback: poll for popup close (user may complete auth and popup auto-closes)
-      const pollTimer = setInterval(() => {
-        if (authWindow && authWindow.closed) {
-          clearInterval(pollTimer);
-          fetchUser();
-          setShowAuthModal(false);
-          window.removeEventListener('message', handleMessage);
-        }
-      }, 500);
+  const handleLogin = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/url`, { credentials: 'include' });
+      const { url } = await res.json();
+      
+      // Check if iOS Safari
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      
+      if (isIOS || window.innerWidth < 768) {
+        // Use full page redirect for iOS
+        window.location.href = url;
+      } else {
+        // Use popup for desktop
+        const authWindow = window.open(url, 'oauth_popup', 'width=600,height=700');
+        
+        const handleMessage = (event: MessageEvent) => {
+          if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+            fetchUser();
+            window.removeEventListener('message', handleMessage);
+          }
+        };
+        window.addEventListener('message', handleMessage);
+      }
+    } catch (err) {
+      console.error("Login failed", err);
     }
   };
 
@@ -530,71 +518,6 @@ export default function App() {
         >
           <LogIn size={20} /> CONNECT GMAIL
         </button>
-
-        {/* In-page Google Auth Modal */}
-        {showAuthModal && (
-          <div
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-6"
-            onClick={(e) => { if (e.target === e.currentTarget) setShowAuthModal(false); }}
-          >
-            <div className="relative bg-surface-container rounded-t-3xl sm:rounded-3xl p-8 w-full max-w-sm shadow-2xl animate-in slide-in-from-bottom-4 fade-in duration-300">
-              {/* Close button */}
-              <button
-                onClick={() => setShowAuthModal(false)}
-                className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest transition-colors"
-                aria-label="Close"
-              >
-                <X size={20} />
-              </button>
-
-              <div className="text-center">
-                {/* Icon */}
-                <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-surface-container-highest flex items-center justify-center">
-                  <Mail size={28} className="text-primary" />
-                </div>
-
-                <h3 className="font-headline text-2xl font-extrabold mb-2 text-on-surface">Connect Your Gmail</h3>
-                <p className="text-on-surface-variant text-sm mb-8 leading-relaxed">
-                  Sign in with your Google account to start cleaning your inbox. You'll choose which account to use on the next screen.
-                </p>
-
-                {/* Google Sign-In Button */}
-                <button
-                  onClick={handleAuthProceed}
-                  disabled={!authUrl}
-                  className="w-full bg-white text-neutral-800 px-6 py-3.5 rounded-full font-bold text-sm flex items-center justify-center gap-3 hover:bg-neutral-100 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
-                >
-                  {/* Google "G" logo */}
-                  <svg width="20" height="20" viewBox="0 0 48 48">
-                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-                  </svg>
-                  {authUrl ? 'Continue with Google' : 'Loading...'}
-                </button>
-
-                {/* Cancel link */}
-                <button
-                  onClick={() => setShowAuthModal(false)}
-                  className="mt-4 text-on-surface-variant text-sm hover:text-on-surface transition-colors"
-                >
-                  Cancel
-                </button>
-
-                {/* Permissions info */}
-                <div className="mt-6 pt-5 border-t border-surface-container-highest">
-                  <div className="flex items-start gap-2.5 text-left">
-                    <Shield size={14} className="text-primary mt-0.5 shrink-0" />
-                    <p className="text-[11px] text-on-surface-variant/70 leading-relaxed">
-                      Kinetic will request permission to read and manage your Gmail. Your credentials are never stored on our servers.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
